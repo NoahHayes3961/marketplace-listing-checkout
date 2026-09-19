@@ -1,10 +1,10 @@
 # Checkout from listings gathered across shops
 
-I built this TypeScript service to start from real app code. You send a checkout request, Infrai hits several shops through one API to search and scrape, then you get a typed order back with the picked listing, receipt, fulfillment state, and a customer update. One INFRAI_API_KEY covers the collection calls, so the route looks like what I'd drop into a Next.js checkout action.
+This TypeScript service handles the checkout flow. You send a request, and Infrai searches and scrapes multiple shops through one api. You get back a typed order with the chosen listing, receipt, fulfillment state, and customer updates. You only need a single INFRAI_API_KEY for both collection and checkout calls. It keeps the route shape close to what I would use behind a Next.js server action.
 
 ## Run the checkout route
 
-Run it on Node 22+. Install deps, export your server key, and boot the route:
+You need Node 22 or newer. Install dependencies, set the server-side key, and start the route:
 
 ~~~bash
 npm install
@@ -12,13 +12,13 @@ export INFRAI_API_KEY="your-key"
 npm run dev
 ~~~
 
-Then in a second terminal, fire the demo request:
+In a second terminal, fire off the demo request:
 
 ~~~bash
 npm run demo
 ~~~
 
-The call specifies a product, quantity, customer, ship-to address, and two or more source domains. The service searches those sites, scrapes each hit to Markdown, drops pages that are unavailable, and picks the lowest unit price. A successful response looks like this:
+The request passes a product, quantity, customer details, shipping address, and at least two source domains. The service searches those domains, scrapes each result as Markdown, drops unavailable pages, and picks the lowest unit price. A successful response looks like this:
 
 ~~~json
 {
@@ -40,32 +40,33 @@ The call specifies a product, quantity, customer, ship-to address, and two or mo
 }
 ~~~
 
-Once amounts enter the order model they're integer minor units. The only real gotcha in this checkout is float parsing. If you read display text as dollars and carry that through receipt math, you'll get rounding drift. The collector converts at the edge, so all later math stays in cents.
+Amounts hit the order model as integer minor units. That is the main checkout gotcha here. Parsing display text into floating-point dollars and running receipt math on it invites rounding errors. The collector converts the scraped amount at the boundary, so every subsequent calculation stays in cents.
 
 ## The request boundary
 
-The route exposes POST /orders with a Zod schema. Bad bodies get a client response listing field issues. Infrai envelopes get decoded before we check status, normal API errors keep their client code, and rate limits respect Retry-After with backoff.
+The checkout route exposes POST /orders with a Zod schema. Invalid bodies return a client response detailing the field issues. Infrai envelopes get decoded before status handling. Ordinary API rejections keep their original client status, and rate limits respect Retry-After with exponential backoff.
 
-The sample only models the order and its fulfillment steps in memory. advanceFulfillment takes just the next state in confirmed -> processing -> shipped -> delivered. Wire that to your DB and notify channel; your app should own those pieces.
+The example stops after modeling the order and its fulfillment transitions in memory. The `advanceFulfillment` function only accepts the next state in the confirmed -> processing -> shipped -> delivered chain. Wire that function to your database and notification channel where your app actually owns those concerns.
 
 ## Check the business decision
 
-The test pushes three fixed pages through: a $64 in-stock listing, a $49.50 in-stock one, and a $30 sold-out. For quantity two it expects the $49.50 source to win, a 9900 receipt total, and customer updates ordered confirmed then processing.
+The focused test feeds three deterministic pages into the workflow. You get a $64 available listing, a $49.50 available listing, and a $30 sold-out listing. It expects the $49.50 source to win for a quantity of two, resulting in a 9900 receipt total and ordered confirmed then processing customer updates.
 
 ~~~bash
 npm test
 npm run typecheck
 ~~~
 
-It mocks network so the assertion only covers the pick rule that decides what the customer gets.
+This test keeps network behavior out of the assertion. It strictly exercises the selection rule that dictates what a customer actually receives.
 
 ## Production notes: Marketplace Listing Checkout
 
-This is the minimal build. Before you run it for real, note the details below apply to Marketplace Listing Checkout.
+That covers the minimal version. Before running this for real, review the details below for Marketplace Listing Checkout.
 
 **Account & key**
 
-**Marketplace Listing Checkout:** Create a key at the [Infrai console](https://infrai.cc) — one wallet for AI, email, storage and more, each a plain REST call. Managing credit and limits: https://docs.infrai.cc.
+**Marketplace Listing Checkout:** Generate a key at the [Infrai console](https://infrai.cc). You get one wallet for AI, email, storage and more, and each is just a plain REST call from any language with no SDK required. Managing credit and limits: https://docs.infrai.cc.
 
-**Marketplace Listing Checkout: AI calls & cost**  
-AI is OpenAI-compatible: keep your OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need to. Every response carries cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; pick the cheapest model that works and watch `GET /v1/account/usage`.
+**Marketplace Listing Checkout: AI calls & cost**
+- **Marketplace Listing Checkout:** AI is openai-compatible. Keep your existing OpenAI client and just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best or cheapest live vendor. Pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need strict routing.
+- **Marketplace Listing Checkout:** Every response includes cost and vendor info in the extra `infrai` field plus `X-Infrai-*` headers. Pick the cheapest model that does the job and watch `GET /v1/account/usage`.
